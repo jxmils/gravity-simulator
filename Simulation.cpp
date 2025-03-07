@@ -4,6 +4,8 @@
 #include <iostream>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <cmath>
 
 Simulation* Simulation::instance = nullptr;
 
@@ -14,31 +16,30 @@ void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id, GLenum se
               << ", message = " << message << std::endl;
 }
 
-Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), bodyShader(nullptr), 
-    zoom(5.0f), rotationX(0.0f), rotationY(0.0f), panX(0.0f), panY(0.0f) {
+Simulation::Simulation() : window(nullptr), gridShader(nullptr), bodyShader(nullptr), textShader(nullptr),
+                         grid(nullptr), timeAcceleration(1.0f), zoom(1.0f), rotation(0.0f),
+                         maxTimeAcceleration(100.0f) {
     instance = this;  // Set singleton instance
     std::cout << "Starting simulation initialization..." << std::endl;
 
     // Initialize GLFW
     if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW" << std::endl;
-        exit(-1);
+        throw std::runtime_error("Failed to initialize GLFW");
     }
     std::cout << "GLFW initialized successfully" << std::endl;
 
-    // Set OpenGL version and profile for macOS
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);  // Use OpenGL 3.3
+    // Configure GLFW
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);  // Enable retina display support
 
     // Create window
-    window = glfwCreateWindow(800, 800, "Einsteinian Solar System", NULL, NULL);
+    window = glfwCreateWindow(1600, 1600, "Gravity Simulator", nullptr, nullptr);
     if (!window) {
-        std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
-        exit(-1);
+        throw std::runtime_error("Failed to create GLFW window");
     }
     std::cout << "Window created successfully" << std::endl;
 
@@ -49,10 +50,7 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
 
     // Initialize GLAD
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cerr << "Failed to initialize GLAD" << std::endl;
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        exit(-1);
+        throw std::runtime_error("Failed to initialize GLAD");
     }
     std::cout << "GLAD initialized successfully" << std::endl;
 
@@ -64,34 +62,24 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
         exit(-1);
     }
 
-    // Check for debug output support
-    const char* extensions = (const char*)glGetString(GL_EXTENSIONS);
-    bool hasDebugOutput = extensions && strstr(extensions, "GL_KHR_debug");
-    
-    if (hasDebugOutput) {
-        std::cout << "Debug output supported, enabling..." << std::endl;
+    // Set up debug output if available
+    GLint flags;
+    glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+    if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {
         glEnable(GL_DEBUG_OUTPUT);
-        glDebugMessageCallback(MessageCallback, 0);
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        glDebugMessageCallback(MessageCallback, nullptr);
+        glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+        std::cout << "Debug output enabled" << std::endl;
     } else {
         std::cout << "Debug output not supported, falling back to error checking" << std::endl;
     }
 
     // Print OpenGL information
-    const GLubyte* version = glGetString(GL_VERSION);
-    const GLubyte* vendor = glGetString(GL_VENDOR);
-    const GLubyte* renderer = glGetString(GL_RENDERER);
-    const GLubyte* glslVersion = glGetString(GL_SHADING_LANGUAGE_VERSION);
-    
-    if (!version || !vendor || !renderer || !glslVersion) {
-        std::cerr << "Failed to get OpenGL information" << std::endl;
-        cleanup();
-        exit(-1);
-    }
-    
-    std::cout << "OpenGL Version: " << version << std::endl;
-    std::cout << "OpenGL Vendor: " << vendor << std::endl;
-    std::cout << "OpenGL Renderer: " << renderer << std::endl;
-    std::cout << "GLSL Version: " << glslVersion << std::endl;
+    std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
+    std::cout << "OpenGL Vendor: " << glGetString(GL_VENDOR) << std::endl;
+    std::cout << "OpenGL Renderer: " << glGetString(GL_RENDERER) << std::endl;
+    std::cout << "GLSL Version: " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
 
     // Get framebuffer size
     int width, height;
@@ -105,89 +93,78 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glClearColor(0.0f, 0.0f, 0.1f, 1.0f);  // Dark blue background
 
-    // Register keyboard callback
-    glfwSetKeyCallback(window, keyCallback);
-
-    // Initialize projection matrix (after window creation)
-    float aspect = (float)width / (float)height;
-    projectionMatrix = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
-    
-    // Initialize view matrix
-    updateCameraMatrices();
-
+    // Initialize shaders
+    std::cout << "Starting shader initialization..." << std::endl;
     try {
-        std::cout << "Starting shader initialization..." << std::endl;
+        // Create grid shader
+        std::cout << "Creating grid shader..." << std::endl;
+        gridShader = new Shader("grid_vertex_shader.glsl", "grid_fragment_shader.glsl");
+        std::cout << "Grid shader initialized successfully with ID: " << gridShader->ID << std::endl;
         
-        // Initialize shaders with detailed error checking
-        try {
-            std::cout << "Creating grid shader..." << std::endl;
-            gridShader = new Shader("grid_vertex_shader.glsl", "grid_fragment_shader.glsl");
-            std::cout << "Grid shader initialized successfully with ID: " << gridShader->ID << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to initialize grid shader: " << e.what() << std::endl;
-            throw;
-        }
+        // Create body shader
+        std::cout << "Creating body shader..." << std::endl;
+        bodyShader = new Shader("body_vertex_shader.glsl", "body_fragment_shader.glsl");
+        std::cout << "Body shader initialized successfully with ID: " << bodyShader->ID << std::endl;
         
-        try {
-            std::cout << "Creating body shader..." << std::endl;
-            bodyShader = new Shader("body_vertex_shader.glsl", "body_fragment_shader.glsl");
-            std::cout << "Body shader initialized successfully with ID: " << bodyShader->ID << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to initialize body shader: " << e.what() << std::endl;
-            throw;
+        // Create text shader
+        std::cout << "Creating text shader..." << std::endl;
+        textShader = new Shader("text_vertex_shader.glsl", "text_fragment_shader.glsl");
+        if (!textShader->ID) {
+            throw std::runtime_error("Failed to create text shader");
         }
-
-        // Initialize SpacetimeGrid after OpenGL is set up
-        try {
-            std::cout << "Creating SpacetimeGrid..." << std::endl;
-            grid = new SpacetimeGrid();
-            std::cout << "SpacetimeGrid created successfully" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to create SpacetimeGrid: " << e.what() << std::endl;
-            throw;
-        }
-
-        std::cout << "Starting celestial body creation..." << std::endl;
-        
-        // Add celestial bodies with adjusted sizes
-        try {
-            // Sun at center with zero velocity - smaller visual size
-            bodies.emplace_back(0.0f, 0.0f, 0.0f, 0.0f, 1.989e30f, 0.2f, 1.0f, 0.9f, 0.0f); // Sun (yellow)
-            std::cout << "Sun created successfully" << std::endl;
-            
-            // Earth at x=1.496e11 (1 AU) with orbital velocity - proportionally smaller
-            bodies.emplace_back(1.496e11f, 0.0f, 0.0f, 29.78e3f, 5.972e24f, 0.1f, 0.2f, 0.5f, 1.0f); // Earth (blue)
-            std::cout << "Earth created successfully" << std::endl;
-
-            // Initialize shader uniforms for all bodies
-            bodyShader->use();
-            for (auto& body : bodies) {
-                body.setupShaderUniforms(*bodyShader);
-            }
-            std::cout << "Body shader uniforms initialized" << std::endl;
-
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to create celestial bodies: " << e.what() << std::endl;
-            throw;
-        }
-
-        // Register window resize callback
-        glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int width, int height) {
-            glViewport(0, 0, width, height);
-        });
-        std::cout << "Window resize callback registered" << std::endl;
-
-        // Check for OpenGL errors
-        GLenum err;
-        while ((err = glGetError()) != GL_NO_ERROR) {
-            std::cerr << "OpenGL error during initialization: 0x" << std::hex << err << std::dec << std::endl;
-        }
+        std::cout << "Text shader initialized successfully with ID: " << textShader->ID << std::endl;
         
     } catch (const std::exception& e) {
-        std::cerr << "Error during initialization: " << e.what() << std::endl;
+        std::cerr << "Failed to initialize text shader: " << e.what() << std::endl;
         cleanup();
-        exit(-1);
+        throw;
     }
+
+    // Set up camera
+    updateCameraMatrices();
+    
+    // Store instance for callbacks
+    instance = this;
+    
+    // Set up keyboard callback
+    glfwSetKeyCallback(window, keyCallback);
+
+    // Create celestial bodies
+    // Sun at center with mass 1.0 (normalized units)
+    bodies.emplace_back(
+        0.0f, 0.0f,                // x, y position
+        0.0f, 0.0f,                // vx, vy velocity
+        1.0f,                      // mass
+        0.5f,                      // radius (increased from 0.2f)
+        1.0f, 0.9f, 0.0f          // r, g, b color
+    );
+    
+    // Earth with elliptical orbit
+    // Semi-major axis = 1.0 AU (normalized)
+    // Eccentricity = 0.0167 (Earth's actual eccentricity)
+    bodies.emplace_back(
+        1.0f, 0.0f,                // x, y position (start at (1,0))
+        0.0f, 1.0f,                // vx, vy velocity (circular orbit)
+        0.000003f,                 // mass (relative to Sun)
+        0.15f,                     // visible radius
+        0.0f, 0.7f, 1.0f          // r, g, b color
+    );
+    
+    // Create grid
+    grid = new SpacetimeGrid();
+
+    // Register window resize callback
+    glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int width, int height) {
+        glViewport(0, 0, width, height);
+    });
+    std::cout << "Window resize callback registered" << std::endl;
+
+    // Check for OpenGL errors
+    GLenum err;
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        std::cerr << "OpenGL error during initialization: 0x" << std::hex << err << std::dec << std::endl;
+    }
+    
     std::cout << "Simulation initialization completed successfully" << std::endl;
 }
 
@@ -212,6 +189,12 @@ void Simulation::cleanup() {
         std::cout << "Body shader cleaned up" << std::endl;
     }
     
+    if (textShader) {
+        delete textShader;
+        textShader = nullptr;
+        std::cout << "Text shader cleaned up" << std::endl;
+    }
+    
     if (window) {
         glfwDestroyWindow(window);
         window = nullptr;
@@ -228,118 +211,97 @@ Simulation::~Simulation() {
 
 void Simulation::run() {
     std::cout << "Starting simulation loop..." << std::endl;
+    float lastTime = glfwGetTime();
     
     while (!glfwWindowShouldClose(window)) {
+        float currentTime = glfwGetTime();
+        float deltaTime = (currentTime - lastTime) * timeAcceleration;
+        lastTime = currentTime;
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        float time = glfwGetTime();
 
         // Update camera matrices
         updateCameraMatrices();
 
-        // Store initial VAO binding
-        GLint initialVAO;
-        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &initialVAO);
-        std::cout << "\nFrame start, initial VAO binding: " << initialVAO << std::endl;
-
         // Draw the warped spacetime grid
         gridShader->use();
-        gridShader->setFloat("time", time);
+        gridShader->setFloat("time", currentTime);
         gridShader->setMat4("view", viewMatrix);
         gridShader->setMat4("projection", projectionMatrix);
-        grid->drawGrid(*gridShader, time);
+        gridShader->setFloat("zoom", zoom);
+        gridShader->setFloat("rotation", rotation);
+        
+        grid->drawGrid(*gridShader, currentTime);
 
-        // Verify VAO state after grid drawing
-        GLint postGridVAO;
-        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &postGridVAO);
-        std::cout << "VAO binding after grid draw: " << postGridVAO << std::endl;
-
-        // Update and render celestial bodies
+        // Update and render celestial bodies with accelerated time
         bodyShader->use();
         bodyShader->setMat4("view", viewMatrix);
         bodyShader->setMat4("projection", projectionMatrix);
         
-        for (auto& body : bodies) {
-            body.updatePosition();
-            
-            // Get VAO binding before drawing body
-            GLint preBodyVAO;
-            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &preBodyVAO);
-            std::cout << "VAO binding before drawing body: " << preBodyVAO << std::endl;
-            
-            body.draw(*bodyShader);
-            
-            // Verify VAO state after body drawing
-            GLint postBodyVAO;
-            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &postBodyVAO);
-            std::cout << "VAO binding after drawing body: " << postBodyVAO << std::endl;
+        // Update Earth's position using Kepler's equations
+        float simulationTime = currentTime * timeAcceleration;
+        for (size_t i = 1; i < bodies.size(); i++) {  // Skip Sun (index 0)
+            bodies[i].updatePosition(deltaTime);
         }
 
-        // Restore initial VAO binding at end of frame
-        glBindVertexArray(initialVAO);
-        std::cout << "Restored initial VAO binding: " << initialVAO << std::endl;
+        // Draw all celestial bodies
+        for (const auto& body : bodies) {
+            body.draw(*bodyShader);
+        }
+
+        // Draw time acceleration text
+        int width, height;
+        glfwGetFramebufferSize(window, &width, &height);
+        
+        // Create text projection matrix for screen space
+        glm::mat4 textProjection = glm::ortho(0.0f, (float)width, 0.0f, (float)height);
+        
+        textShader->use();
+        textShader->setMat4("projection", textProjection);
+        
+        // Draw text in top-right corner
+        float quadWidth = 200.0f;
+        float quadHeight = 50.0f;
+        float x = width - quadWidth - 10.0f;
+        float y = height - quadHeight - 10.0f;
+        
+        // Draw text background
+        glUniform4f(glGetUniformLocation(textShader->ID, "color"), 0.0f, 0.0f, 0.0f, 0.3f);
+        drawTextBackground(x, y, quadWidth, quadHeight);
+        
+        // Draw text
+        glUniform4f(glGetUniformLocation(textShader->ID, "color"), 1.0f, 1.0f, 1.0f, 1.0f);
+        std::string text = "Time: " + std::to_string((int)timeAcceleration) + "x";
+        drawText(text, x + 10.0f, y + 10.0f, 0.5f);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
-
-        // Check for OpenGL errors
-        GLenum err;
-        while ((err = glGetError()) != GL_NO_ERROR) {
-            std::cerr << "OpenGL error in run loop: 0x" << std::hex << err << std::dec << std::endl;
-        }
     }
-    std::cout << "Simulation loop ended" << std::endl;
+    std::cout << "\nSimulation loop ended" << std::endl;
 }
 
 void Simulation::keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (instance) {
-        instance->handleKeyPress(key, action);
-    }
-}
+    if (instance == nullptr) return;
 
-void Simulation::handleKeyPress(int key, int action) {
     if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-        const float rotationSpeed = 2.0f;
-        const float zoomSpeed = 0.1f;
-        const float panSpeed = 0.1f;
-        
         switch (key) {
-            case GLFW_KEY_MINUS:
-            case GLFW_KEY_KP_SUBTRACT:
-                zoom = std::max(0.1f, zoom - zoomSpeed);
-                std::cout << "Zooming out: " << zoom << std::endl;
-                break;
-            case GLFW_KEY_EQUAL:
-            case GLFW_KEY_KP_ADD:
-                zoom = std::min(10.0f, zoom + zoomSpeed);
-                std::cout << "Zooming in: " << zoom << std::endl;
-                break;
-            case GLFW_KEY_UP:
-                rotationX = std::min(89.0f, rotationX + rotationSpeed);
-                std::cout << "Rotating up: " << rotationX << std::endl;
-                break;
-            case GLFW_KEY_DOWN:
-                rotationX = std::max(-89.0f, rotationX - rotationSpeed);
-                std::cout << "Rotating down: " << rotationX << std::endl;
-                break;
             case GLFW_KEY_LEFT:
-                rotationY -= rotationSpeed;
-                std::cout << "Rotating left: " << rotationY << std::endl;
+                instance->rotation -= 0.1f;
                 break;
             case GLFW_KEY_RIGHT:
-                rotationY += rotationSpeed;
-                std::cout << "Rotating right: " << rotationY << std::endl;
+                instance->rotation += 0.1f;
                 break;
-            case GLFW_KEY_W:
-                panY += panSpeed;
+            case GLFW_KEY_EQUAL:  // '=' key for zoom in
+                instance->zoom *= 1.1f;
                 break;
-            case GLFW_KEY_S:
-                panY -= panSpeed;
+            case GLFW_KEY_MINUS:  // '-' key for zoom out
+                instance->zoom /= 1.1f;
                 break;
-            case GLFW_KEY_A:
-                panX -= panSpeed;
+            case GLFW_KEY_LEFT_BRACKET:  // '[' key to decrease time speed
+                instance->timeAcceleration = std::max(1.0f, instance->timeAcceleration / 2.0f);
                 break;
-            case GLFW_KEY_D:
-                panX += panSpeed;
+            case GLFW_KEY_RIGHT_BRACKET:  // ']' key to increase time speed
+                instance->timeAcceleration = std::min(instance->maxTimeAcceleration, instance->timeAcceleration * 2.0f);
                 break;
         }
     }
@@ -350,12 +312,85 @@ void Simulation::updateCameraMatrices() {
     viewMatrix = glm::mat4(1.0f);
     
     // Set up orthographic projection with zoom
-    float orthoSize = 10.0f / zoom;  // Zoom affects the view volume
-    projectionMatrix = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, -100.0f, 100.0f);
+    float orthoSize = 2.0f / zoom;  // Smaller view size
+    projectionMatrix = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, -10.0f, 10.0f);
     
     // Apply camera transformations in correct order
-    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, -3.0f));  // Move back
-    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationX), glm::vec3(1.0f, 0.0f, 0.0f));  // Rotate around X
-    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationY), glm::vec3(0.0f, 1.0f, 0.0f));  // Rotate around Y
-    viewMatrix = glm::translate(viewMatrix, glm::vec3(panX, panY, 0.0f));  // Apply panning last
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, -2.0f));  // Move camera closer
+    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotation), glm::vec3(1.0f, 0.0f, 0.0f));
+    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationY), glm::vec3(0.0f, 1.0f, 0.0f));
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(panX, panY, 0.0f));
+}
+
+void Simulation::drawTextBackground(float x, float y, float width, float height) {
+    // Create vertices for a quad
+    float vertices[] = {
+        x, y, 0.0f, 0.0f, 0.0f,
+        x + width, y, 0.0f, 1.0f, 0.0f,
+        x, y + height, 0.0f, 0.0f, 1.0f,
+        x + width, y + height, 0.0f, 1.0f, 1.0f
+    };
+    
+    // Create and bind VAO
+    unsigned int VAO;
+    glGenVertexArrays(1, &VAO);
+    glBindVertexArray(VAO);
+    
+    // Create and bind VBO
+    unsigned int VBO;
+    glGenBuffers(1, &VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    
+    // Set vertex attributes
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    
+    // Draw the quad
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    // Cleanup
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
+}
+
+void Simulation::drawText(const std::string& text, float x, float y, float scale) {
+    // For now, we'll just draw a simple quad as placeholder text
+    // In a real implementation, you would use a font texture atlas and render actual text
+    float width = text.length() * 20.0f * scale;  // Approximate width based on text length
+    float height = 30.0f * scale;  // Fixed height
+    
+    // Create vertices for a quad
+    float vertices[] = {
+        x, y, 0.0f, 0.0f, 0.0f,
+        x + width, y, 0.0f, 1.0f, 0.0f,
+        x, y + height, 0.0f, 0.0f, 1.0f,
+        x + width, y + height, 0.0f, 1.0f, 1.0f
+    };
+    
+    // Create and bind VAO
+    unsigned int VAO;
+    glGenVertexArrays(1, &VAO);
+    glBindVertexArray(VAO);
+    
+    // Create and bind VBO
+    unsigned int VBO;
+    glGenBuffers(1, &VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    
+    // Set vertex attributes
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    
+    // Draw the quad
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    // Cleanup
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
 }

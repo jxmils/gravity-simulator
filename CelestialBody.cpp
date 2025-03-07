@@ -23,7 +23,7 @@ CelestialBody::~CelestialBody() {
     cleanup();
 }
 
-void CelestialBody::initializeBuffers() {
+void CelestialBody::initializeBuffers() const {
     // Generate vertices for a sphere using triangles
     std::vector<float> vertices;
     const int latitudeBands = 30;
@@ -94,7 +94,7 @@ void CelestialBody::initializeBuffers() {
     std::cout << "Generated sphere with " << vertices.size()/3 << " vertices and " << indices.size() << " indices" << std::endl;
 }
 
-void CelestialBody::setupShaderUniforms(const Shader& shader) {
+void CelestialBody::setupShaderUniforms(const Shader& shader) const {
     // Store current VAO binding to restore later
     GLint previousVAO;
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
@@ -195,34 +195,20 @@ void CelestialBody::computeAcceleration(float& ax, float& ay) {
     ay = factor * y * relativistic_correction;
 }
 
-void CelestialBody::updatePosition() {
-    float k1x = vx * dt, k1y = vy * dt;
-    float k1vx, k1vy;
-    computeAcceleration(k1vx, k1vy);
-    k1vx *= dt; k1vy *= dt;
-
-    float k2x = (vx + 0.5 * k1vx) * dt, k2y = (vy + 0.5 * k1vy) * dt;
-    float k2vx, k2vy;
-    computeAcceleration(k2vx, k2vy);
-    k2vx *= dt; k2vy *= dt;
-
-    float k3x = (vx + 0.5 * k2vx) * dt, k3y = (vy + 0.5 * k2vy) * dt;
-    float k3vx, k3vy;
-    computeAcceleration(k3vx, k3vy);
-    k3vx *= dt; k3vy *= dt;
-
-    float k4x = (vx + k3vx) * dt, k4y = (vy + k3vy) * dt;
-    float k4vx, k4vy;
-    computeAcceleration(k4vx, k4vy);
-    k4vx *= dt; k4vy *= dt;
-
-    x += (k1x + 2 * k2x + 2 * k3x + k4x) / 6;
-    y += (k1y + 2 * k2y + 2 * k3y + k4y) / 6;
-    vx += (k1vx + 2 * k2vx + 2 * k3vx + k4vx) / 6;
-    vy += (k1vy + 2 * k2vy + 2 * k3vy + k4vy) / 6;
+void CelestialBody::updatePosition(float deltaTime) {
+    float ax = 0.0f, ay = 0.0f;
+    computeAcceleration(ax, ay);
+    
+    // Update velocity using acceleration (a = F/m)
+    vx += ax * deltaTime;
+    vy += ay * deltaTime;
+    
+    // Update position using velocity
+    x += vx * deltaTime;
+    y += vy * deltaTime;
 }
 
-void CelestialBody::draw(const Shader& shader) {
+void CelestialBody::draw(const Shader& shader) const {
     // Scale positions to visible range
     float scaled_x = x * SCALE;
     float scaled_y = y * SCALE;
@@ -230,12 +216,9 @@ void CelestialBody::draw(const Shader& shader) {
     // Create model matrix using GLM
     glm::mat4 modelMatrix = glm::mat4(1.0f);
     modelMatrix = glm::translate(modelMatrix, glm::vec3(scaled_x, scaled_y, 0.0f));
-    modelMatrix = glm::scale(modelMatrix, glm::vec3(radius, radius, radius));  // Use radius for all dimensions
+    modelMatrix = glm::scale(modelMatrix, glm::vec3(radius * 0.5f, radius * 0.5f, radius * 0.5f));
 
-    // Debug output
-    std::cout << "Drawing celestial body at (" << scaled_x << ", " << scaled_y << ") with radius " << radius << std::endl;
-
-    // Ensure shader is active
+    // Bind shader first
     shader.use();
     
     // Set up uniforms if not already done
@@ -248,18 +231,12 @@ void CelestialBody::draw(const Shader& shader) {
         shader.setMat4("model", modelMatrix);
     }
     if (colorLoc != -1) {
-        glUniform3fv(colorLoc, 1, color);
+        shader.setVec3("color", color[0], color[1], color[2]);
     }
 
     // Bind VAO and draw
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, vertexCount, GL_UNSIGNED_INT, 0);
-    
-    // Check for OpenGL errors
-    GLenum err;
-    while ((err = glGetError()) != GL_NO_ERROR) {
-        std::cerr << "OpenGL error in draw: 0x" << std::hex << err << std::dec << std::endl;
-    }
 }
 
 void CelestialBody::cleanup() {

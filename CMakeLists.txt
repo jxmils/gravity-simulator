@@ -69,3 +69,5 @@ configure_file(${CMAKE_SOURCE_DIR}/grid_vertex_shader.glsl ${CMAKE_BINARY_DIR}/g
 configure_file(${CMAKE_SOURCE_DIR}/grid_fragment_shader.glsl ${CMAKE_BINARY_DIR}/grid_fragment_shader.glsl COPYONLY)
 configure_file(${CMAKE_SOURCE_DIR}/body_vertex_shader.glsl ${CMAKE_BINARY_DIR}/body_vertex_shader.glsl COPYONLY)
 configure_file(${CMAKE_SOURCE_DIR}/body_fragment_shader.glsl ${CMAKE_BINARY_DIR}/body_fragment_shader.glsl COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/text_vertex_shader.glsl ${CMAKE_BINARY_DIR}/text_vertex_shader.glsl COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/text_fragment_shader.glsl ${CMAKE_BINARY_DIR}/text_fragment_shader.glsl COPYONLY)
