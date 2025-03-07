@@ -1,0 +1,46 @@
+# Build directories
+build/
+out/
+debug/
+release/
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+gravity_sim
+
+# CMake
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Dependency directories
+_deps/
