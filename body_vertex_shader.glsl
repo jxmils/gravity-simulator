@@ -1,14 +1,20 @@
 #version 330 core
-layout (location = 0) in vec2 aPos;
+layout (location = 0) in vec3 aPos;
+
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform float zoom = 1.0;
+
+out vec3 Normal;
+out vec3 FragPos;
 
 void main() {
-    // Convert 2D position to 3D
-    vec4 pos = model * vec4(aPos.x, aPos.y, 0.0, 1.0);
+    // Calculate normal (for a sphere, normal is the same as position for unit sphere)
+    Normal = normalize(mat3(model) * aPos);
     
-    // Apply view and projection transformations
-    gl_Position = projection * view * vec4(pos.xyz * zoom, 1.0);
+    // Calculate fragment position in world space
+    FragPos = vec3(model * vec4(aPos, 1.0));
+    
+    // Final position
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
 } 

@@ -17,7 +17,7 @@ SpacetimeGrid::SpacetimeGrid() : VAO(0), VBO(0), timeLoc(-1) {
     
     try {
         // Generate grid vertices
-        const int gridSize = 20;
+        const int gridSize = 100; 
         const float step = 2.0f / gridSize;  // Step size to cover -1 to 1
         
         // Pre-calculate the number of vertices needed

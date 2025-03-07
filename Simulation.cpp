@@ -15,7 +15,7 @@ void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id, GLenum se
 }
 
 Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), bodyShader(nullptr), 
-    zoom(1.0f), rotationX(30.0f), rotationY(0.0f) {
+    zoom(5.0f), rotationX(0.0f), rotationY(0.0f), panX(0.0f), panY(0.0f) {
     instance = this;  // Set singleton instance
     std::cout << "Starting simulation initialization..." << std::endl;
 
@@ -151,12 +151,12 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
         
         // Add celestial bodies with adjusted sizes
         try {
-            // Sun at center, larger radius
-            bodies.emplace_back(0.0f, 0.0f, 0.0f, 0.0f, 1.989e30, 0.2f, 1.0f, 0.9f, 0.0f); // Sun (yellow)
+            // Sun at center with zero velocity - smaller visual size
+            bodies.emplace_back(0.0f, 0.0f, 0.0f, 0.0f, 1.989e30f, 0.2f, 1.0f, 0.9f, 0.0f); // Sun (yellow)
             std::cout << "Sun created successfully" << std::endl;
             
-            // Earth at x=0.5, smaller radius
-            bodies.emplace_back(0.5f, 0.0f, 0.0f, 0.3f, 5.972e24, 0.1f, 0.2f, 0.5f, 1.0f); // Earth (blue)
+            // Earth at x=1.496e11 (1 AU) with orbital velocity - proportionally smaller
+            bodies.emplace_back(1.496e11f, 0.0f, 0.0f, 29.78e3f, 5.972e24f, 0.1f, 0.2f, 0.5f, 1.0f); // Earth (blue)
             std::cout << "Earth created successfully" << std::endl;
 
             // Initialize shader uniforms for all bodies
@@ -244,7 +244,6 @@ void Simulation::run() {
         // Draw the warped spacetime grid
         gridShader->use();
         gridShader->setFloat("time", time);
-        gridShader->setFloat("zoom", zoom);
         gridShader->setMat4("view", viewMatrix);
         gridShader->setMat4("projection", projectionMatrix);
         grid->drawGrid(*gridShader, time);
@@ -256,7 +255,6 @@ void Simulation::run() {
 
         // Update and render celestial bodies
         bodyShader->use();
-        bodyShader->setFloat("zoom", zoom);
         bodyShader->setMat4("view", viewMatrix);
         bodyShader->setMat4("projection", projectionMatrix);
         
@@ -300,24 +298,27 @@ void Simulation::keyCallback(GLFWwindow* window, int key, int scancode, int acti
 
 void Simulation::handleKeyPress(int key, int action) {
     if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-        const float rotationSpeed = 5.0f;
+        const float rotationSpeed = 2.0f;
+        const float zoomSpeed = 0.1f;
+        const float panSpeed = 0.1f;
+        
         switch (key) {
             case GLFW_KEY_MINUS:
             case GLFW_KEY_KP_SUBTRACT:
-                zoom *= 0.9f;
+                zoom = std::max(0.1f, zoom - zoomSpeed);
                 std::cout << "Zooming out: " << zoom << std::endl;
                 break;
             case GLFW_KEY_EQUAL:
             case GLFW_KEY_KP_ADD:
-                zoom *= 1.1f;
+                zoom = std::min(10.0f, zoom + zoomSpeed);
                 std::cout << "Zooming in: " << zoom << std::endl;
                 break;
             case GLFW_KEY_UP:
-                rotationX += rotationSpeed;
+                rotationX = std::min(89.0f, rotationX + rotationSpeed);
                 std::cout << "Rotating up: " << rotationX << std::endl;
                 break;
             case GLFW_KEY_DOWN:
-                rotationX -= rotationSpeed;
+                rotationX = std::max(-89.0f, rotationX - rotationSpeed);
                 std::cout << "Rotating down: " << rotationX << std::endl;
                 break;
             case GLFW_KEY_LEFT:
@@ -328,18 +329,33 @@ void Simulation::handleKeyPress(int key, int action) {
                 rotationY += rotationSpeed;
                 std::cout << "Rotating right: " << rotationY << std::endl;
                 break;
+            case GLFW_KEY_W:
+                panY += panSpeed;
+                break;
+            case GLFW_KEY_S:
+                panY -= panSpeed;
+                break;
+            case GLFW_KEY_A:
+                panX -= panSpeed;
+                break;
+            case GLFW_KEY_D:
+                panX += panSpeed;
+                break;
         }
     }
 }
 
 void Simulation::updateCameraMatrices() {
-    // Reset view matrix
+    // Start with identity matrices
     viewMatrix = glm::mat4(1.0f);
     
-    // Position camera
-    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, -3.0f));
+    // Set up orthographic projection with zoom
+    float orthoSize = 10.0f / zoom;  // Zoom affects the view volume
+    projectionMatrix = glm::ortho(-orthoSize, orthoSize, -orthoSize, orthoSize, -100.0f, 100.0f);
     
-    // Apply rotations
-    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationX), glm::vec3(1.0f, 0.0f, 0.0f));
-    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationY), glm::vec3(0.0f, 1.0f, 0.0f));
+    // Apply camera transformations in correct order
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, -3.0f));  // Move back
+    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationX), glm::vec3(1.0f, 0.0f, 0.0f));  // Rotate around X
+    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationY), glm::vec3(0.0f, 1.0f, 0.0f));  // Rotate around Y
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(panX, panY, 0.0f));  // Apply panning last
 }

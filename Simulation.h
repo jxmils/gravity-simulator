@@ -21,6 +21,8 @@ private:
     // Camera parameters
     float rotationX;  // Rotation around X-axis (pitch)
     float rotationY;  // Rotation around Y-axis (yaw)
+    float panX;  // Add panning variables
+    float panY;
     glm::mat4 projectionMatrix;
     glm::mat4 viewMatrix;
     
