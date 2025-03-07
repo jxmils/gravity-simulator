@@ -2,6 +2,10 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+Simulation* Simulation::instance = nullptr;
 
 void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam) {
     std::cerr << "GL CALLBACK: " << (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "") 
@@ -10,7 +14,9 @@ void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id, GLenum se
               << ", message = " << message << std::endl;
 }
 
-Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), bodyShader(nullptr) {
+Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), bodyShader(nullptr), 
+    zoom(1.0f), rotationX(30.0f), rotationY(0.0f) {
+    instance = this;  // Set singleton instance
     std::cout << "Starting simulation initialization..." << std::endl;
 
     // Initialize GLFW
@@ -98,6 +104,16 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glClearColor(0.0f, 0.0f, 0.1f, 1.0f);  // Dark blue background
+
+    // Register keyboard callback
+    glfwSetKeyCallback(window, keyCallback);
+
+    // Initialize projection matrix (after window creation)
+    float aspect = (float)width / (float)height;
+    projectionMatrix = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+    
+    // Initialize view matrix
+    updateCameraMatrices();
 
     try {
         std::cout << "Starting shader initialization..." << std::endl;
@@ -217,6 +233,9 @@ void Simulation::run() {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         float time = glfwGetTime();
 
+        // Update camera matrices
+        updateCameraMatrices();
+
         // Store initial VAO binding
         GLint initialVAO;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &initialVAO);
@@ -225,6 +244,9 @@ void Simulation::run() {
         // Draw the warped spacetime grid
         gridShader->use();
         gridShader->setFloat("time", time);
+        gridShader->setFloat("zoom", zoom);
+        gridShader->setMat4("view", viewMatrix);
+        gridShader->setMat4("projection", projectionMatrix);
         grid->drawGrid(*gridShader, time);
 
         // Verify VAO state after grid drawing
@@ -234,6 +256,10 @@ void Simulation::run() {
 
         // Update and render celestial bodies
         bodyShader->use();
+        bodyShader->setFloat("zoom", zoom);
+        bodyShader->setMat4("view", viewMatrix);
+        bodyShader->setMat4("projection", projectionMatrix);
+        
         for (auto& body : bodies) {
             body.updatePosition();
             
@@ -242,7 +268,7 @@ void Simulation::run() {
             glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &preBodyVAO);
             std::cout << "VAO binding before drawing body: " << preBodyVAO << std::endl;
             
-            body.draw(*bodyShader);  // Draw each body right after updating its position
+            body.draw(*bodyShader);
             
             // Verify VAO state after body drawing
             GLint postBodyVAO;
@@ -264,4 +290,56 @@ void Simulation::run() {
         }
     }
     std::cout << "Simulation loop ended" << std::endl;
+}
+
+void Simulation::keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (instance) {
+        instance->handleKeyPress(key, action);
+    }
+}
+
+void Simulation::handleKeyPress(int key, int action) {
+    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+        const float rotationSpeed = 5.0f;
+        switch (key) {
+            case GLFW_KEY_MINUS:
+            case GLFW_KEY_KP_SUBTRACT:
+                zoom *= 0.9f;
+                std::cout << "Zooming out: " << zoom << std::endl;
+                break;
+            case GLFW_KEY_EQUAL:
+            case GLFW_KEY_KP_ADD:
+                zoom *= 1.1f;
+                std::cout << "Zooming in: " << zoom << std::endl;
+                break;
+            case GLFW_KEY_UP:
+                rotationX += rotationSpeed;
+                std::cout << "Rotating up: " << rotationX << std::endl;
+                break;
+            case GLFW_KEY_DOWN:
+                rotationX -= rotationSpeed;
+                std::cout << "Rotating down: " << rotationX << std::endl;
+                break;
+            case GLFW_KEY_LEFT:
+                rotationY -= rotationSpeed;
+                std::cout << "Rotating left: " << rotationY << std::endl;
+                break;
+            case GLFW_KEY_RIGHT:
+                rotationY += rotationSpeed;
+                std::cout << "Rotating right: " << rotationY << std::endl;
+                break;
+        }
+    }
+}
+
+void Simulation::updateCameraMatrices() {
+    // Reset view matrix
+    viewMatrix = glm::mat4(1.0f);
+    
+    // Position camera
+    viewMatrix = glm::translate(viewMatrix, glm::vec3(0.0f, 0.0f, -3.0f));
+    
+    // Apply rotations
+    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationX), glm::vec3(1.0f, 0.0f, 0.0f));
+    viewMatrix = glm::rotate(viewMatrix, glm::radians(rotationY), glm::vec3(0.0f, 1.0f, 0.0f));
 }

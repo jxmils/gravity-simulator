@@ -166,3 +166,16 @@ void Shader::setVec3(const std::string& name, float x, float y, float z) const {
     }
     glUniform3f(location, x, y, z);
 }
+
+void Shader::setMat4(const std::string& name, const glm::mat4& matrix) const {
+    if (ID == 0) {
+        std::cerr << "ERROR::SHADER::INVALID_PROGRAM_ID" << std::endl;
+        return;
+    }
+    GLint location = glGetUniformLocation(ID, name.c_str());
+    if (location == -1) {
+        std::cerr << "Warning: Uniform '" << name << "' not found in shader" << std::endl;
+        return;
+    }
+    glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(matrix));
+}
