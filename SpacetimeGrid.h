@@ -10,7 +10,10 @@ class SpacetimeGrid {
 private:
     unsigned int VAO, VBO;
     std::vector<float> vertices;
+    GLint timeLoc;  // Cache the time uniform location
     void initializeBuffers();
+    void setupShaderUniforms(const Shader& shader);  // New method to setup uniforms
+    void cleanup();  // Helper method to clean up OpenGL resources
 
 public:
     SpacetimeGrid();

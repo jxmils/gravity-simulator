@@ -17,48 +17,148 @@ CelestialBody::CelestialBody(float x, float y, float vx, float vy, float mass, f
 }
 
 CelestialBody::~CelestialBody() {
-    if (VAO != 0) {
-        glDeleteVertexArrays(1, &VAO);
-    }
-    if (VBO != 0) {
-        glDeleteBuffers(1, &VBO);
-    }
+    cleanup();
 }
 
 void CelestialBody::initializeBuffers() {
-    std::vector<float> vertices;
-    vertices.push_back(0.0f); // Center point
-    vertices.push_back(0.0f);
-
     // Generate circle vertices
-    const int segments = 50;
+    const int segments = 32;  // Reduced for better performance, still smooth
+    std::vector<float> vertices;
+    vertices.reserve((segments + 2) * 2);  // Reserve space for all vertices
+    
+    // Center vertex
+    vertices.push_back(0.0f);  // x
+    vertices.push_back(0.0f);  // y
+    
+    // Generate circle vertices
     for (int i = 0; i <= segments; i++) {
         float theta = 2.0f * M_PI * float(i) / float(segments);
-        vertices.push_back(cosf(theta));
-        vertices.push_back(sinf(theta));
+        vertices.push_back(cosf(theta));  // x
+        vertices.push_back(sinf(theta));  // y
     }
 
+    // Store vertex count for drawing
+    vertexCount = vertices.size() / 2;  // Number of vertices (not floats)
+    std::cout << "Initializing CelestialBody buffers with " << vertexCount << " vertices" << std::endl;
+
+    // Clear any existing errors
+    while (glGetError() != GL_NO_ERROR) {}
+
+    // Store current VAO binding to restore later
+    GLint previousVAO;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
+    std::cout << "Previous VAO binding before initialization: " << previousVAO << std::endl;
+
+    // Delete any existing buffers
+    cleanup();
+
+    // Generate and bind VAO first
     glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Error generating VAO: 0x" << std::hex << err << std::dec << std::endl;
+        throw std::runtime_error("Failed to generate VAO");
+    }
+    
+    if (VAO == 0) {
+        throw std::runtime_error("Failed to generate VAO - invalid ID returned");
+    }
+    std::cout << "Generated CelestialBody VAO ID: " << VAO << std::endl;
 
     glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
-
-    // Check for OpenGL errors
-    GLenum err;
-    while ((err = glGetError()) != GL_NO_ERROR) {
-        std::cerr << "OpenGL error in initializeBuffers: " << err << std::endl;
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Error binding VAO: 0x" << std::hex << err << std::dec << std::endl;
+        cleanup();
+        throw std::runtime_error("Failed to bind VAO");
     }
+    std::cout << "Binding CelestialBody VAO: " << VAO << std::endl;
+
+    // Generate and bind VBO
+    glGenBuffers(1, &VBO);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Error generating VBO: 0x" << std::hex << err << std::dec << std::endl;
+        cleanup();
+        throw std::runtime_error("Failed to generate VBO");
+    }
+    if (VBO == 0) {
+        cleanup();
+        throw std::runtime_error("Failed to generate VBO - invalid ID returned");
+    }
+    
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Error binding VBO: 0x" << std::hex << err << std::dec << std::endl;
+        cleanup();
+        throw std::runtime_error("Failed to bind VBO");
+    }
+    
+    // Upload vertex data
+    size_t bufferSize = vertices.size() * sizeof(float);
+    glBufferData(GL_ARRAY_BUFFER, bufferSize, vertices.data(), GL_STATIC_DRAW);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Error uploading vertex data: 0x" << std::hex << err << std::dec << std::endl;
+        cleanup();
+        throw std::runtime_error("Failed to upload vertex data");
+    }
+    
+    // Set up vertex attributes while VAO is bound
+    glEnableVertexAttribArray(0);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Error enabling vertex attrib array: 0x" << std::hex << err << std::dec << std::endl;
+        cleanup();
+        throw std::runtime_error("Failed to enable vertex attribute array");
+    }
+    
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "Error setting vertex attrib pointer: 0x" << std::hex << err << std::dec << std::endl;
+        cleanup();
+        throw std::runtime_error("Failed to set vertex attribute pointer");
+    }
+    
+    // Verify attribute array is enabled
+    GLint enabled;
+    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &enabled);
+    if (!enabled) {
+        std::cerr << "Warning: Vertex attribute array 0 is not enabled" << std::endl;
+        glEnableVertexAttribArray(0);
+    }
+
+    // Unbind VBO but keep VAO bound
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    // Keep VAO bound and verify final state
+    GLint currentVAO;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &currentVAO);
+    if (currentVAO != VAO) {
+        std::cerr << "Error: VAO binding lost at end of initialization. Expected: " << VAO << ", Got: " << currentVAO << std::endl;
+        cleanup();
+        throw std::runtime_error("VAO binding verification failed");
+    }
+
+    // Keep our VAO bound instead of restoring previous
+    std::cout << "Keeping VAO " << VAO << " bound at end of initialization" << std::endl;
+
+    std::cout << "Buffer initialization completed successfully with " 
+              << vertices.size() / 2 << " vertices" << std::endl;
 }
 
 void CelestialBody::setupShaderUniforms(const Shader& shader) {
+    // Store current VAO binding to restore later
+    GLint previousVAO;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
+    std::cout << "Previous VAO binding in setupShaderUniforms: " << previousVAO << std::endl;
+
+    // Ensure shader is active first
+    shader.use();
+
+    // Get uniform locations
     modelLoc = glGetUniformLocation(shader.ID, "model");
     colorLoc = glGetUniformLocation(shader.ID, "color");
     
@@ -68,6 +168,73 @@ void CelestialBody::setupShaderUniforms(const Shader& shader) {
     if (colorLoc == -1) {
         std::cerr << "Warning: 'color' uniform not found in shader" << std::endl;
     }
+
+    // Now bind our VAO
+    glBindVertexArray(VAO);
+    std::cout << "Binding VAO in setupShaderUniforms: " << VAO << std::endl;
+
+    // Verify VAO binding
+    GLint currentVAO;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &currentVAO);
+    if (currentVAO != VAO) {
+        std::cerr << "Error: VAO binding mismatch in setupShaderUniforms. Expected: " << VAO << ", Got: " << currentVAO << std::endl;
+        // Attempt to rebind
+        glBindVertexArray(VAO);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &currentVAO);
+        if (currentVAO != VAO) {
+            // Try reinitializing buffers as a last resort
+            std::cout << "Attempting to recover by reinitializing buffers..." << std::endl;
+            initializeBuffers();
+            glBindVertexArray(VAO);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &currentVAO);
+            if (currentVAO != VAO) {
+                throw std::runtime_error("VAO binding verification failed after recovery attempts");
+            }
+        }
+    }
+
+    // Create a temporary identity matrix for validation
+    float identityMatrix[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+
+    // Set temporary uniforms for validation
+    if (modelLoc != -1) {
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, identityMatrix);
+    }
+    if (colorLoc != -1) {
+        glUniform3fv(colorLoc, 1, color);
+    }
+
+    // Verify attribute array is enabled
+    GLint enabled;
+    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &enabled);
+    if (!enabled) {
+        std::cerr << "Warning: Vertex attribute array 0 is not enabled" << std::endl;
+        glEnableVertexAttribArray(0);
+    }
+
+    // Validate shader with VAO bound and uniforms set
+    GLint validateStatus;
+    glValidateProgram(shader.ID);
+    glGetProgramiv(shader.ID, GL_VALIDATE_STATUS, &validateStatus);
+    if (validateStatus == GL_FALSE) {
+        GLchar infoLog[512];
+        glGetProgramInfoLog(shader.ID, 512, NULL, infoLog);
+        std::cerr << "Shader validation failed: " << infoLog << std::endl;
+    }
+
+    // Check for OpenGL errors
+    GLenum err;
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        std::cerr << "OpenGL error in setupShaderUniforms: 0x" << std::hex << err << std::dec << std::endl;
+    }
+
+    // Keep our VAO bound instead of restoring previous
+    std::cout << "Keeping VAO " << VAO << " bound at end of setupShaderUniforms" << std::endl;
 }
 
 void CelestialBody::computeAcceleration(float& ax, float& ay) {
@@ -107,34 +274,97 @@ void CelestialBody::updatePosition() {
 }
 
 void CelestialBody::draw(const Shader& shader) {
+    if (VAO == 0 || VBO == 0) {
+        std::cerr << "Warning: Attempting to draw with invalid buffers" << std::endl;
+        return;
+    }
+
+    // Store current VAO binding to restore later
+    GLint previousVAO;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
+    std::cout << "Previous VAO binding before celestial body draw: " << previousVAO << std::endl;
+
+    // Ensure shader is active first
     shader.use();
     
+    // Set up uniforms if not already done
     if (modelLoc == -1 || colorLoc == -1) {
         setupShaderUniforms(shader);
     }
 
-    glBindVertexArray(VAO);
-    
     // Create model matrix for position and scale (column-major order)
     float modelMatrix[16] = {
-        radius, 0.0f, 0.0f, 0.0f,   // First column
-        0.0f, radius, 0.0f, 0.0f,   // Second column
+        radius, 0.0f, 0.0f, 0.0f,   // First column (scale x)
+        0.0f, radius, 0.0f, 0.0f,   // Second column (scale y)
         0.0f, 0.0f, 1.0f, 0.0f,     // Third column
         x, y, 0.0f, 1.0f            // Fourth column (translation)
     };
-    
-    // Set uniforms
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, modelMatrix);  // GL_FALSE for column-major
-    glUniform3fv(colorLoc, 1, color);
 
-    // Draw the celestial body
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 52); // 50 segments + center point + closing point
-    
-    glBindVertexArray(0);
+    // Bind our VAO
+    std::cout << "Drawing CelestialBody, binding VAO: " << VAO << std::endl;
+    glBindVertexArray(VAO);
 
+    // Verify VAO binding
+    GLint currentVAO;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &currentVAO);
+    if (currentVAO != VAO) {
+        std::cerr << "Error: VAO not bound correctly in CelestialBody draw. Expected: " << VAO << ", Got: " << currentVAO << std::endl;
+        
+        // Try to recover by reinitializing buffers
+        std::cout << "Attempting to recover by reinitializing buffers..." << std::endl;
+        initializeBuffers();
+        glBindVertexArray(VAO);
+        
+        // Verify VAO again after recovery
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &currentVAO);
+        if (currentVAO != VAO) {
+            std::cerr << "Error: Failed to recover VAO binding. Got: " << currentVAO << std::endl;
+            return;
+        }
+    }
+
+    // Set uniforms with VAO bound
+    if (modelLoc != -1) {
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, modelMatrix);
+    }
+    if (colorLoc != -1) {
+        glUniform3fv(colorLoc, 1, color);
+    }
+
+    // Verify attribute array is enabled
+    GLint enabled;
+    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &enabled);
+    if (!enabled) {
+        std::cerr << "Warning: Vertex attribute array 0 is not enabled" << std::endl;
+        glEnableVertexAttribArray(0);
+    }
+
+    // Draw the circle
+    glDrawArrays(GL_TRIANGLE_FAN, 0, vertexCount);
+    
     // Check for OpenGL errors
     GLenum err;
     while ((err = glGetError()) != GL_NO_ERROR) {
-        std::cerr << "OpenGL error in draw: " << err << std::endl;
+        std::cerr << "OpenGL error in CelestialBody draw: 0x" << std::hex << err << std::dec 
+                  << " (drawing circle with " << vertexCount << " vertices)" << std::endl;
+    }
+    
+    // Restore previous VAO binding only if it was different
+    if (previousVAO != VAO) {
+        glBindVertexArray(previousVAO);
+        std::cout << "Restored previous VAO binding: " << previousVAO << std::endl;
+    } else {
+        std::cout << "Keeping current VAO binding: " << VAO << std::endl;
+    }
+}
+
+void CelestialBody::cleanup() {
+    if (VAO != 0) {
+        glDeleteVertexArrays(1, &VAO);
+        VAO = 0;
+    }
+    if (VBO != 0) {
+        glDeleteBuffers(1, &VBO);
+        VBO = 0;
     }
 }

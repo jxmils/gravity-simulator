@@ -1,8 +1,8 @@
-#ifndef CELESTIALBODY_H
-#define CELESTIALBODY_H
+#pragma once
 
 #include <glad/glad.h>
 #include <cmath>
+#include <vector>
 
 class Shader;  // Forward declaration
 
@@ -12,6 +12,7 @@ public:
     float color[3];
     unsigned int VAO, VBO;
     GLint modelLoc, colorLoc;  // Cache uniform locations
+    int vertexCount;  // Number of vertices in the circle
 
     CelestialBody(float x, float y, float vx, float vy, float mass, float radius, float r, float g, float b);
     ~CelestialBody();
@@ -21,6 +22,7 @@ public:
     void draw(const Shader& shader);  // Now takes shader as parameter
     void initializeBuffers();
     void setupShaderUniforms(const Shader& shader);  // New method to setup uniforms
-};
 
-#endif
+private:
+    void cleanup();  // Helper method to clean up OpenGL resources
+};

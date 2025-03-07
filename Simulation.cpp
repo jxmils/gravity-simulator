@@ -21,8 +21,8 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
     std::cout << "GLFW initialized successfully" << std::endl;
 
     // Set OpenGL version and profile for macOS
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);  // Request OpenGL 4.1
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);  // Use OpenGL 3.3
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);  // Enable retina display support
@@ -49,6 +49,14 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
         exit(-1);
     }
     std::cout << "GLAD initialized successfully" << std::endl;
+
+    // Verify OpenGL capabilities
+    if (!GLAD_GL_VERSION_3_3) {
+        std::cerr << "OpenGL 3.3 is not supported" << std::endl;
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        exit(-1);
+    }
 
     // Check for debug output support
     const char* extensions = (const char*)glGetString(GL_EXTENSIONS);
@@ -134,6 +142,14 @@ Simulation::Simulation() : window(nullptr), grid(nullptr), gridShader(nullptr), 
             // Earth at x=0.5, smaller radius
             bodies.emplace_back(0.5f, 0.0f, 0.0f, 0.3f, 5.972e24, 0.1f, 0.2f, 0.5f, 1.0f); // Earth (blue)
             std::cout << "Earth created successfully" << std::endl;
+
+            // Initialize shader uniforms for all bodies
+            bodyShader->use();
+            for (auto& body : bodies) {
+                body.setupShaderUniforms(*bodyShader);
+            }
+            std::cout << "Body shader uniforms initialized" << std::endl;
+
         } catch (const std::exception& e) {
             std::cerr << "Failed to create celestial bodies: " << e.what() << std::endl;
             throw;
@@ -201,19 +217,42 @@ void Simulation::run() {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         float time = glfwGetTime();
 
+        // Store initial VAO binding
+        GLint initialVAO;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &initialVAO);
+        std::cout << "\nFrame start, initial VAO binding: " << initialVAO << std::endl;
+
         // Draw the warped spacetime grid
         gridShader->use();
         gridShader->setFloat("time", time);
         grid->drawGrid(*gridShader, time);
 
+        // Verify VAO state after grid drawing
+        GLint postGridVAO;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &postGridVAO);
+        std::cout << "VAO binding after grid draw: " << postGridVAO << std::endl;
+
         // Update and render celestial bodies
         bodyShader->use();
         for (auto& body : bodies) {
             body.updatePosition();
+            
+            // Get VAO binding before drawing body
+            GLint preBodyVAO;
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &preBodyVAO);
+            std::cout << "VAO binding before drawing body: " << preBodyVAO << std::endl;
+            
+            body.draw(*bodyShader);  // Draw each body right after updating its position
+            
+            // Verify VAO state after body drawing
+            GLint postBodyVAO;
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &postBodyVAO);
+            std::cout << "VAO binding after drawing body: " << postBodyVAO << std::endl;
         }
-        for (auto& body : bodies) {
-            body.draw(*bodyShader);
-        }
+
+        // Restore initial VAO binding at end of frame
+        glBindVertexArray(initialVAO);
+        std::cout << "Restored initial VAO binding: " << initialVAO << std::endl;
 
         glfwSwapBuffers(window);
         glfwPollEvents();
